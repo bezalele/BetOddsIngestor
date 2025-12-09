@@ -1,21 +1,53 @@
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
+using System;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using BetOddsIngestor.Data;
-using BetOddsIngestor.Services;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.EntityFrameworkCore;
 using BetOddsIngestor.Providers.TheOddsApi;
+using BetOddsIngestor.Services;
+using SmartSportsBetting.Infrastructure.Data;
 
-var b=Host.CreateApplicationBuilder(args);
-b.Configuration.AddJsonFile("appsettings.json",false,true);
+using var host = Host.CreateDefaultBuilder(args)
+    .ConfigureAppConfiguration((ctx, cfg) =>
+    {
+        cfg.AddJsonFile("appsettings.json", optional: true, reloadOnChange: true);
+    })
+    .ConfigureServices((ctx, services) =>
+    {
+        var configuration = ctx.Configuration;
+        var conn = configuration.GetConnectionString("BettingDb");
+        if (!string.IsNullOrWhiteSpace(conn))
+        {
+            services.AddDbContext<BettingDbContext>(options => options.UseSqlServer(conn));
+        }
+        else
+        {
+            services.AddDbContext<BettingDbContext>(options => options.UseInMemoryDatabase("dev"));
+        }
 
-b.Services.AddDbContext<BettingDbContext>(o=>o.UseSqlServer(b.Configuration.GetConnectionString("BettingDb")));
-b.Services.AddHttpClient<TheOddsApiClient>();
-b.Services.AddScoped<IOddsProviderClient>(sp=>sp.GetRequiredService<TheOddsApiClient>());
-b.Services.AddScoped<OddsIngestionService>();
+        services.AddHttpClient<TheOddsApiClient>(client =>
+        {
+            // HttpClient configuration can be done via appsettings
+        });
+        services.AddSingleton<IOddsProviderClient, TheOddsApiClient>(sp => sp.GetRequiredService<TheOddsApiClient>());
 
-var h=b.Build();
-using var scope=h.Services.CreateScope();
-var svc=scope.ServiceProvider.GetRequiredService<OddsIngestionService>();
-await svc.RunOnceAsync();
-Console.WriteLine("Done");
+        services.AddTransient<OddsIngestionService>();
+    })
+    .ConfigureLogging(logging => logging.AddConsole())
+    .Build();
+
+using var scope = host.Services.CreateScope();
+var services = scope.ServiceProvider;
+try
+{
+    var ingestor = services.GetRequiredService<OddsIngestionService>();
+    await ingestor.RunOnceAsync();
+}
+catch (Exception ex)
+{
+    var logger = services.GetService<ILoggerFactory>()?.CreateLogger("Bootstrap");
+    logger?.LogError(ex, "Error running ingestion");
+}
+
+// exit
