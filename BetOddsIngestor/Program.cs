@@ -12,7 +12,6 @@ using SmartSportsBetting.Infrastructure.Data;
 using var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((ctx, cfg) =>
     {
-        // Default builder already sets content root to the project folder
         cfg.AddJsonFile("appsettings.json", optional: true, reloadOnChange: true);
         cfg.AddEnvironmentVariables();
     })
@@ -40,9 +39,14 @@ using var host = Host.CreateDefaultBuilder(args)
         services.AddSingleton<IScheduleProviderClient, TheOddsApiScheduleClient>(sp =>
             sp.GetRequiredService<TheOddsApiScheduleClient>());
 
+        services.AddHttpClient<TheOddsApiScoresClient>();
+        services.AddSingleton<IResultsProviderClient, TheOddsApiScoresClient>(sp =>
+            sp.GetRequiredService<TheOddsApiScoresClient>());
+
         // --- Ingestion services ---------------------------------------------
         services.AddTransient<ScheduleIngestionService>();
         services.AddTransient<OddsIngestionService>();
+        services.AddTransient<ResultsIngestionService>();
     })
     .ConfigureLogging(logging => logging.AddConsole())
     .Build();
@@ -52,13 +56,17 @@ var services = scope.ServiceProvider;
 
 try
 {
-    // 1) Run schedule ingest first (ensures all Games exist)
+    // 1) Schedule ingest
     var scheduleIngestor = services.GetRequiredService<ScheduleIngestionService>();
     await scheduleIngestor.RunOnceAsync();
 
-    // 2) Run odds ingest (attaches odds to those games)
+    // 2) Odds ingest
     var oddsIngestor = services.GetRequiredService<OddsIngestionService>();
     await oddsIngestor.RunOnceAsync();
+
+    // 3) Results ingest (for completed games)
+    var resultsIngestor = services.GetRequiredService<ResultsIngestionService>();
+    await resultsIngestor.RunOnceAsync();
 
     Console.WriteLine("BetOddsIngestor run complete.");
 }
