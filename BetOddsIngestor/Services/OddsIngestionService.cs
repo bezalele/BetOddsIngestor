@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using SmartSportsBetting.Infrastructure.Data;
 using SmartSportsBetting.Domain.Entities;
+using System.Globalization;
 
 namespace BetOddsIngestor.Services;
 
@@ -18,7 +19,11 @@ public class OddsIngestionService
     public async Task RunOnceAsync()
     {
         var snaps = await _client.GetTodayOddsAsync();
-        if (!snaps.Any()) { Console.WriteLine("No odds returned"); return; }
+        if (!snaps.Any())
+        {
+            Console.WriteLine("No odds returned");
+            return;
+        }
 
         // ensure sport + league
         var sport = await _db.Sports.FirstOrDefaultAsync(x => x.Code == "BASKETBALL");
@@ -46,13 +51,21 @@ public class OddsIngestionService
             await _db.SaveChangesAsync();
         }
 
+        // NBA slate is based on US Eastern Time
+        var eastern = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+
         foreach (var s in snaps)
         {
             // provider
             var prov = await _db.OddsProviders.FirstOrDefaultAsync(x => x.Code == s.ProviderCode);
             if (prov == null)
             {
-                prov = new OddsProvider { Name = s.ProviderCode, Code = s.ProviderCode, IsActive = true };
+                prov = new OddsProvider
+                {
+                    Name = s.ProviderCode,
+                    Code = s.ProviderCode,
+                    IsActive = true
+                };
                 _db.OddsProviders.Add(prov);
                 await _db.SaveChangesAsync();
             }
@@ -61,6 +74,16 @@ public class OddsIngestionService
             var ht = await FindTeam(league.LeagueId, s.HomeTeam);
             var at = await FindTeam(league.LeagueId, s.AwayTeam);
 
+            // ----- CORRECT GAME TIME + SLATE DATE HANDLING -----
+
+            // s.GameTime is provider's UTC time
+            var utcStart = DateTime.SpecifyKind(s.GameTime, DateTimeKind.Utc);
+
+            // Convert to Eastern for slate date
+            var startEt = TimeZoneInfo.ConvertTimeFromUtc(utcStart, eastern);
+            var slateDateEt = startEt.Date;              // NBA "game day" (ET)
+            var season = startEt.Year.ToString();        // season from local year
+
             // game dedup via ExternalRef
             var game = await _db.Games.FirstOrDefaultAsync(x => x.ExternalRef == s.GameId);
             if (game == null)
@@ -68,9 +91,9 @@ public class OddsIngestionService
                 game = new Game
                 {
                     LeagueId = league.LeagueId,
-                    Season = s.GameTime.Year.ToString(),
-                    StartTimeUtc = s.GameTime,
-                    GameDateUtc = s.GameTime.Date,
+                    Season = season,
+                    StartTimeUtc = utcStart,   // true UTC tip time
+                    GameDateUtc = slateDateEt, // correct slate date (ET)
                     HomeTeamId = ht.TeamId,
                     AwayTeamId = at.TeamId,
                     ExternalRef = s.GameId
@@ -78,34 +101,85 @@ public class OddsIngestionService
                 _db.Games.Add(game);
                 await _db.SaveChangesAsync();
             }
+            else
+            {
+                // Keep existing game but correct any bad dates/times
+                bool changed = false;
+
+                if (game.StartTimeUtc != utcStart)
+                {
+                    game.StartTimeUtc = utcStart;
+                    changed = true;
+                }
+
+                if (game.GameDateUtc != slateDateEt)
+                {
+                    game.GameDateUtc = slateDateEt;
+                    changed = true;
+                }
+
+                if (!string.Equals(game.Season, season, StringComparison.Ordinal))
+                {
+                    game.Season = season;
+                    changed = true;
+                }
+
+                if (changed)
+                    await _db.SaveChangesAsync();
+            }
 
             // Ensure Market for this game / moneyline
-            var market = await _db.Markets.FirstOrDefaultAsync(m => m.GameId == game.GameId && m.MarketTypeId == mlType.MarketTypeId && m.Period == "FULL_GAME");
+            var market = await _db.Markets.FirstOrDefaultAsync(m =>
+                m.GameId == game.GameId &&
+                m.MarketTypeId == mlType.MarketTypeId &&
+                m.Period == "FULL_GAME");
+
             if (market == null)
             {
-                market = new Market { GameId = game.GameId, MarketTypeId = mlType.MarketTypeId, Period = "FULL_GAME", IsActive = true, CreatedUtc = DateTime.UtcNow };
+                market = new Market
+                {
+                    GameId = game.GameId,
+                    MarketTypeId = mlType.MarketTypeId,
+                    Period = "FULL_GAME",
+                    IsActive = true,
+                    CreatedUtc = DateTime.UtcNow
+                };
                 _db.Markets.Add(market);
                 await _db.SaveChangesAsync();
             }
 
             // Ensure HOME/AWAY MarketOutcome entries
-            var homeOutcome = await _db.MarketOutcomes.FirstOrDefaultAsync(o => o.MarketId == market.MarketId && o.OutcomeCode == "HOME");
+            var homeOutcome = await _db.MarketOutcomes.FirstOrDefaultAsync(o =>
+                o.MarketId == market.MarketId && o.OutcomeCode == "HOME");
             if (homeOutcome == null)
             {
-                homeOutcome = new MarketOutcome { MarketId = market.MarketId, OutcomeCode = "HOME", Description = "Home ML", SortOrder = 1 };
+                homeOutcome = new MarketOutcome
+                {
+                    MarketId = market.MarketId,
+                    OutcomeCode = "HOME",
+                    Description = "Home ML",
+                    SortOrder = 1
+                };
                 _db.MarketOutcomes.Add(homeOutcome);
                 await _db.SaveChangesAsync();
             }
 
-            var awayOutcome = await _db.MarketOutcomes.FirstOrDefaultAsync(o => o.MarketId == market.MarketId && o.OutcomeCode == "AWAY");
+            var awayOutcome = await _db.MarketOutcomes.FirstOrDefaultAsync(o =>
+                o.MarketId == market.MarketId && o.OutcomeCode == "AWAY");
             if (awayOutcome == null)
             {
-                awayOutcome = new MarketOutcome { MarketId = market.MarketId, OutcomeCode = "AWAY", Description = "Away ML", SortOrder = 2 };
+                awayOutcome = new MarketOutcome
+                {
+                    MarketId = market.MarketId,
+                    OutcomeCode = "AWAY",
+                    Description = "Away ML",
+                    SortOrder = 2
+                };
                 _db.MarketOutcomes.Add(awayOutcome);
                 await _db.SaveChangesAsync();
             }
 
-            // Insert snapshots per side (create domain OddsSnapshot explicitly to avoid conflict with DTO type)
+            // Insert snapshots per side
             if (s.HomeMoneyline.HasValue)
             {
                 var snap = new SmartSportsBetting.Domain.Entities.OddsSnapshot
