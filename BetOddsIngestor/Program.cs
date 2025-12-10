@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using BetOddsIngestor.Providers.TheOddsApi;
 using BetOddsIngestor.Services;
+using BetOddsIngestor.Clients;
 using SmartSportsBetting.Infrastructure.Data;
 
 using var host = Host.CreateDefaultBuilder(args)
@@ -17,6 +18,8 @@ using var host = Host.CreateDefaultBuilder(args)
     {
         var configuration = ctx.Configuration;
         var conn = configuration.GetConnectionString("BettingDb");
+
+        // --- DbContext -------------------------------------------------------
         if (!string.IsNullOrWhiteSpace(conn))
         {
             services.AddDbContext<BettingDbContext>(options => options.UseSqlServer(conn));
@@ -26,12 +29,16 @@ using var host = Host.CreateDefaultBuilder(args)
             services.AddDbContext<BettingDbContext>(options => options.UseInMemoryDatabase("dev"));
         }
 
-        services.AddHttpClient<TheOddsApiClient>(client =>
-        {
-            // HttpClient configuration can be done via appsettings
-        });
-        services.AddSingleton<IOddsProviderClient, TheOddsApiClient>(sp => sp.GetRequiredService<TheOddsApiClient>());
+        // --- HttpClient for external APIs -----------------------------------
+        services.AddHttpClient<TheOddsApiClient>();
+        services.AddSingleton<IOddsProviderClient, TheOddsApiClient>(sp =>
+            sp.GetRequiredService<TheOddsApiClient>());
 
+        // Placeholder schedule provider – replace with real implementation later
+        services.AddSingleton<IScheduleProviderClient, StubScheduleProviderClient>();
+
+        // --- Ingestion services ---------------------------------------------
+        services.AddTransient<ScheduleIngestionService>();
         services.AddTransient<OddsIngestionService>();
     })
     .ConfigureLogging(logging => logging.AddConsole())
@@ -39,14 +46,24 @@ using var host = Host.CreateDefaultBuilder(args)
 
 using var scope = host.Services.CreateScope();
 var services = scope.ServiceProvider;
+
 try
 {
-    var ingestor = services.GetRequiredService<OddsIngestionService>();
-    await ingestor.RunOnceAsync();
+    // --- 1) Run schedule ingest first (ensures all Games exist) -------------
+    var scheduleIngestor = services.GetRequiredService<ScheduleIngestionService>();
+    await scheduleIngestor.RunOnceAsync();
+
+    // --- 2) Run odds ingest (attaches odds to the games from schedule) ------
+    var oddsIngestor = services.GetRequiredService<OddsIngestionService>();
+    await oddsIngestor.RunOnceAsync();
+
+    Console.WriteLine("BetOddsIngestor run complete.");
 }
 catch (Exception ex)
 {
-    var logger = services.GetService<ILoggerFactory>()?.CreateLogger("Bootstrap");
+    var logger = services.GetService<ILoggerFactory>()
+        ?.CreateLogger("Bootstrap");
+
     logger?.LogError(ex, "Error running ingestion");
 }
 
