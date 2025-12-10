@@ -27,3 +27,20 @@ public class OddsApiOutcome
     public decimal price { get; set; }
     public decimal? point { get; set; }
 }
+
+// DTOs for scores endpoint used by TheOddsApiScoresClient
+public class ScoreEventDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string? HomeTeam { get; set; }
+    public string? AwayTeam { get; set; }
+    public DateTime? CommenceTime { get; set; }
+    public bool Completed { get; set; }
+    public List<ScoreDto>? Scores { get; set; }
+}
+
+public class ScoreDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string Score { get; set; } = string.Empty; // API returns score as string
+}

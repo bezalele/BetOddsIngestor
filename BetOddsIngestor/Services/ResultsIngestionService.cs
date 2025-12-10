@@ -52,7 +52,9 @@ namespace BetOddsIngestor.Services
                 return;
             }
 
-            var connString = _db.Database.GetDbConnection().ConnectionString;
+            // Read the original configured connection string (keeps password)
+            var connString = _config.GetConnectionString("BettingDb")
+                             ?? throw new InvalidOperationException("Connection string 'BettingDb' is not configured.");
 
             using var conn = new SqlConnection(connString);
             await conn.OpenAsync();

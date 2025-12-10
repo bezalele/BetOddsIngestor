@@ -9,6 +9,8 @@ using BetOddsIngestor.Services;
 using BetOddsIngestor.Clients;
 using SmartSportsBetting.Infrastructure.Data;
 
+var mode = args.Length > 0 ? args[0].ToLowerInvariant() : "live";
+
 using var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((ctx, cfg) =>
     {
@@ -20,7 +22,7 @@ using var host = Host.CreateDefaultBuilder(args)
         var configuration = ctx.Configuration;
         var conn = configuration.GetConnectionString("BettingDb");
 
-        // --- DbContext -------------------------------------------------------
+        // DbContext
         if (!string.IsNullOrWhiteSpace(conn))
         {
             services.AddDbContext<BettingDbContext>(options => options.UseSqlServer(conn));
@@ -30,25 +32,22 @@ using var host = Host.CreateDefaultBuilder(args)
             services.AddDbContext<BettingDbContext>(options => options.UseInMemoryDatabase("dev"));
         }
 
-        // --- HttpClients for external APIs ----------------------------------
-        services.AddHttpClient<TheOddsApiClient>();
-        services.AddSingleton<IOddsProviderClient, TheOddsApiClient>(sp =>
-            sp.GetRequiredService<TheOddsApiClient>());
+        // HTTP clients
+        services.AddHttpClient<IOddsProviderClient, TheOddsApiClient>();
+        services.AddHttpClient<IScheduleProviderClient, TheOddsApiScheduleClient>();
+        services.AddHttpClient<IResultsProviderClient, TheOddsApiScoresClient>();
+        services.AddHttpClient<BalldontlieNbaClient>();
 
-        services.AddHttpClient<TheOddsApiScheduleClient>();
-        services.AddSingleton<IScheduleProviderClient, TheOddsApiScheduleClient>(sp =>
-            sp.GetRequiredService<TheOddsApiScheduleClient>());
-
-        services.AddHttpClient<TheOddsApiScoresClient>();
-        services.AddSingleton<IResultsProviderClient, TheOddsApiScoresClient>(sp =>
-            sp.GetRequiredService<TheOddsApiScoresClient>());
-
-        // --- Ingestion services ---------------------------------------------
+        // Services
         services.AddTransient<ScheduleIngestionService>();
         services.AddTransient<OddsIngestionService>();
         services.AddTransient<ResultsIngestionService>();
+        services.AddTransient<HistoryIngestionService>();
     })
-    .ConfigureLogging(logging => logging.AddConsole())
+    .ConfigureLogging(logging =>
+    {
+        logging.AddConsole();
+    })
     .Build();
 
 using var scope = host.Services.CreateScope();
@@ -56,23 +55,30 @@ var services = scope.ServiceProvider;
 
 try
 {
-    // 1) Schedule ingest
-    var scheduleIngestor = services.GetRequiredService<ScheduleIngestionService>();
-    await scheduleIngestor.RunOnceAsync();
+    if (mode == "backfill-history")
+    {
+        var history = services.GetRequiredService<HistoryIngestionService>();
+        await history.RunOnceAsync();
+    }
+    else
+    {
+        // Normal live ingestion: schedule + odds + results
+        var schedule = services.GetRequiredService<ScheduleIngestionService>();
+        await schedule.RunOnceAsync();
 
-    // 2) Odds ingest
-    var oddsIngestor = services.GetRequiredService<OddsIngestionService>();
-    await oddsIngestor.RunOnceAsync();
+        var odds = services.GetRequiredService<OddsIngestionService>();
+        await odds.RunOnceAsync();
 
-    // 3) Results ingest (for completed games)
-    var resultsIngestor = services.GetRequiredService<ResultsIngestionService>();
-    await resultsIngestor.RunOnceAsync();
+        var results = services.GetRequiredService<ResultsIngestionService>();
+        await results.RunOnceAsync();
+    }
 
     Console.WriteLine("BetOddsIngestor run complete.");
 }
 catch (Exception ex)
 {
-    var logger = services.GetService<ILoggerFactory>()
+    var logger = services
+        .GetService<ILoggerFactory>()
         ?.CreateLogger("Bootstrap");
 
     logger?.LogError(ex, "Error running ingestion");

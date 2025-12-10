@@ -8,16 +8,15 @@ using Microsoft.Extensions.Configuration;
 
 namespace BetOddsIngestor.Providers.TheOddsApi
 {
+    /// <summary>
+    /// Reads completed games with scores from TheOddsAPI /scores endpoint.
+    /// Implements IResultsProviderClient for the results ingestion pipeline.
+    /// </summary>
     public sealed class TheOddsApiScoresClient : IResultsProviderClient
     {
         private readonly HttpClient _httpClient;
         private readonly string _apiKey;
         private readonly string _sportKey;
-
-        private static readonly JsonSerializerOptions JsonOptions = new()
-        {
-            PropertyNameCaseInsensitive = true
-        };
 
         public TheOddsApiScoresClient(HttpClient httpClient, IConfiguration configuration)
         {
@@ -38,7 +37,7 @@ namespace BetOddsIngestor.Providers.TheOddsApi
 
         public async Task<IReadOnlyList<ScoreGameDto>> GetScoresAsync(DateTime fromUtc, DateTime toUtc)
         {
-            // Pull recent scores (last few days), then filter by [fromUtc, toUtc)
+            // Pull recent scores; we filter by [fromUtc, toUtc) ourselves
             const int daysFrom = 3;
             var url = $"sports/{_sportKey}/scores?apiKey={_apiKey}&daysFrom={daysFrom}";
 
@@ -51,76 +50,73 @@ namespace BetOddsIngestor.Providers.TheOddsApi
             }
 
             var json = await response.Content.ReadAsStringAsync();
-            var events = JsonSerializer.Deserialize<List<ScoreEventDto>>(json, JsonOptions)
-                         ?? new List<ScoreEventDto>();
-
             var results = new List<ScoreGameDto>();
 
-            foreach (var e in events)
+            using var doc = JsonDocument.Parse(json);
+            foreach (var ev in doc.RootElement.EnumerateArray())
             {
-                if (e.CommenceTime == null || e.Scores == null || e.Scores.Count == 0)
+                if (!ev.TryGetProperty("commence_time", out var commenceProp))
                     continue;
 
-                var commenceUtc = e.CommenceTime.Value;
+                if (!DateTime.TryParse(commenceProp.GetString(), out var commenceUtc))
+                    continue;
+
                 if (commenceUtc.Kind == DateTimeKind.Unspecified)
                     commenceUtc = DateTime.SpecifyKind(commenceUtc, DateTimeKind.Utc);
 
-                // filter by [fromUtc, toUtc)
                 if (commenceUtc < fromUtc || commenceUtc >= toUtc)
+                    continue;
+
+                var homeTeam = ev.GetProperty("home_team").GetString() ?? "";
+                var awayTeam = ev.GetProperty("away_team").GetString() ?? "";
+
+                if (!ev.TryGetProperty("scores", out var scoresProp) ||
+                    scoresProp.ValueKind != JsonValueKind.Array)
                     continue;
 
                 int? homeScore = null;
                 int? awayScore = null;
 
-                foreach (var s in e.Scores)
+                foreach (var s in scoresProp.EnumerateArray())
                 {
-                    if (!int.TryParse(s.Score, out var parsed))
+                    var name = s.GetProperty("name").GetString() ?? "";
+                    var scoreStr = s.GetProperty("score").GetString();
+
+                    if (string.IsNullOrWhiteSpace(scoreStr))
                         continue;
 
-                    if (string.Equals(s.Name, e.HomeTeam, StringComparison.OrdinalIgnoreCase))
+                    if (!int.TryParse(scoreStr, out var parsed))
+                        continue;
+
+                    if (string.Equals(name, homeTeam, StringComparison.OrdinalIgnoreCase))
                         homeScore = parsed;
-                    else if (string.Equals(s.Name, e.AwayTeam, StringComparison.OrdinalIgnoreCase))
+                    else if (string.Equals(name, awayTeam, StringComparison.OrdinalIgnoreCase))
                         awayScore = parsed;
                 }
 
                 if (homeScore == null || awayScore == null)
                     continue;
 
+                var id = ev.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? "" : "";
+                var completed = ev.TryGetProperty("completed", out var compProp) && compProp.GetBoolean();
                 var season = commenceUtc.Year.ToString();
 
                 results.Add(new ScoreGameDto
                 {
-                    ExternalGameId = e.Id,
+                    ExternalGameId = id,
                     LeagueCode = "NBA",
                     Season = season,
-                    HomeTeamName = e.HomeTeam ?? string.Empty,
-                    AwayTeamName = e.AwayTeam ?? string.Empty,
+                    HomeTeamName = homeTeam,
+                    AwayTeamName = awayTeam,
                     StartTimeUtc = commenceUtc,
                     HomeScore = homeScore,
                     AwayScore = awayScore,
-                    Status = e.Completed ? "Final" : "Completed"
+                    Status = completed ? "Final" : "Completed"
                 });
             }
 
             Console.WriteLine($"[TheOddsApiScoresClient] Returned {results.Count} scored games.");
             return results;
-        }
-
-        // DTOs that match TheOddsAPI scores JSON
-        private sealed class ScoreEventDto
-        {
-            public string Id { get; set; } = default!;
-            public DateTime? CommenceTime { get; set; }
-            public string HomeTeam { get; set; } = default!;
-            public string AwayTeam { get; set; } = default!;
-            public bool Completed { get; set; }
-            public List<ScoreDto>? Scores { get; set; }
-        }
-
-        private sealed class ScoreDto
-        {
-            public string Name { get; set; } = default!;
-            public string Score { get; set; } = default!; // string in API, we parse
         }
     }
 }
