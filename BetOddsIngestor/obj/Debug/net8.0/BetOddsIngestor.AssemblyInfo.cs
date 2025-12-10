@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("BetOddsIngestor")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2c69638e1a6b71af3015cea5ad868c8ccde159df")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+3fd772df954f77856dc4ba0f2831c687515c7a25")]
 [assembly: System.Reflection.AssemblyProductAttribute("BetOddsIngestor")]
 [assembly: System.Reflection.AssemblyTitleAttribute("BetOddsIngestor")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
