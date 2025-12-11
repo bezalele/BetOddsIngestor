@@ -84,6 +84,14 @@ public class OddsIngestionService
             var slateDateEt = startEt.Date;              // NBA "game day" (ET)
             var season = startEt.Year.ToString();        // season from local year
 
+            // Debug logging
+            Console.WriteLine($"Game {s.GameId} ({s.HomeTeam} vs {s.AwayTeam}):");
+            Console.WriteLine($"  Provider time: {s.GameTime:yyyy-MM-dd HH:mm:ss}");
+            Console.WriteLine($"  UTC time: {utcStart:yyyy-MM-dd HH:mm:ss} UTC");
+            Console.WriteLine($"  Eastern time: {startEt:yyyy-MM-dd HH:mm:ss zzz}");
+            Console.WriteLine($"  Slate date (ET): {slateDateEt:yyyy-MM-dd}");
+            Console.WriteLine();
+
             // game dedup via ExternalRef
             var game = await _db.Games.FirstOrDefaultAsync(x => x.ExternalRef == s.GameId);
             if (game == null)

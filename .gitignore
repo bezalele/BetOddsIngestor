@@ -3,3 +3,8 @@ appsettings.json
 appsettings.Development.json
 *.Secrets.json
 *.config
+# Ignore all bin/ directories
+**/bin/
+
+# Ignore all debug/ directories (and Debug/)
+[Dd]ebug/
