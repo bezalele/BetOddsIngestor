@@ -71,7 +71,7 @@ namespace BetOddsIngestor.Services
 
                 cmd.Parameters.AddWithValue("@LeagueCode", g.LeagueCode);
                 cmd.Parameters.AddWithValue("@Season", g.Season);
-                cmd.Parameters.AddWithValue("@GameDateUtc", gameDateEt.Date);
+                cmd.Parameters.AddWithValue("@GameDateUtc", gameDateEt);
                 cmd.Parameters.AddWithValue("@HomeTeamName", g.HomeTeamName);
                 cmd.Parameters.AddWithValue("@AwayTeamName", g.AwayTeamName);
                 cmd.Parameters.AddWithValue("@HomeScore", g.HomeScore.Value);
