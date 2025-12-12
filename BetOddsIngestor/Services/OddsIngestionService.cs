@@ -1,7 +1,8 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using SmartSportsBetting.Infrastructure.Data;
 using SmartSportsBetting.Domain.Entities;
 using System.Globalization;
+using BetOddsIngestor;
 
 namespace BetOddsIngestor.Services;
 
@@ -52,7 +53,7 @@ public class OddsIngestionService
         }
 
         // NBA slate is based on US Eastern Time
-        var eastern = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+        var eastern = EasternTime.Zone;
 
         foreach (var s in snaps)
         {

@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Data;
 using Microsoft.Data.SqlClient;
 using System.Threading.Tasks;
+using BetOddsIngestor;
 using BetOddsIngestor.Clients;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -14,7 +15,6 @@ namespace BetOddsIngestor.Services
         private readonly BettingDbContext _db;
         private readonly IResultsProviderClient _client;
         private readonly IConfiguration _config;
-        private readonly TimeZoneInfo _eastern;
 
         public ResultsIngestionService(
             BettingDbContext db,
@@ -24,7 +24,6 @@ namespace BetOddsIngestor.Services
             _db = db;
             _client = client;
             _config = config;
-            _eastern = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
         }
 
         public async Task RunOnceAsync()
@@ -33,12 +32,12 @@ namespace BetOddsIngestor.Services
 
             // window: last 3 days ET → tomorrow ET
             var nowUtc = DateTime.UtcNow;
-            var nowEt = TimeZoneInfo.ConvertTimeFromUtc(nowUtc, _eastern);
+            var nowEt = EasternTime.ConvertFromUtc(nowUtc);
             var fromEt = nowEt.Date.AddDays(-3);
             var toEt = nowEt.Date.AddDays(1);
 
-            var fromUtc = TimeZoneInfo.ConvertTimeToUtc(fromEt, _eastern);
-            var toUtc = TimeZoneInfo.ConvertTimeToUtc(toEt, _eastern);
+            var fromUtc = EasternTime.ConvertToUtc(fromEt);
+            var toUtc = EasternTime.ConvertToUtc(toEt);
 
             Console.WriteLine($"[Results] Requesting scores from {fromUtc:u} to {toUtc:u}…");
 
@@ -69,7 +68,7 @@ namespace BetOddsIngestor.Services
 
                 // Convert StartTimeUtc → ET slate date, to match Game.GameDateUtc convention
                 var utcStart = DateTime.SpecifyKind(s.StartTimeUtc, DateTimeKind.Utc);
-                var startEt = TimeZoneInfo.ConvertTimeFromUtc(utcStart, _eastern);
+                var startEt = EasternTime.ConvertFromUtc(utcStart);
                 var gameDateUtc = startEt.Date;
 
                 Console.WriteLine(

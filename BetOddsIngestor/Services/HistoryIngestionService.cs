@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Data;
 using Microsoft.Data.SqlClient;
 using System.Threading.Tasks;
+using BetOddsIngestor;
 using BetOddsIngestor.Clients;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -17,7 +18,6 @@ namespace BetOddsIngestor.Services
     {
         private readonly BettingDbContext _db;
         private readonly BalldontlieNbaClient _client;
-        private readonly TimeZoneInfo _eastern;
 
         public HistoryIngestionService(
             BettingDbContext db,
@@ -26,7 +26,6 @@ namespace BetOddsIngestor.Services
         {
             _db = db;
             _client = client;
-            _eastern = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
         }
 
         public async Task RunOnceAsync()
@@ -35,13 +34,13 @@ namespace BetOddsIngestor.Services
 
             // Backfill last 30 days as a start
             var nowUtc = DateTime.UtcNow;
-            var nowEt = TimeZoneInfo.ConvertTimeFromUtc(nowUtc, _eastern);
+            var nowEt = EasternTime.ConvertFromUtc(nowUtc);
 
             var fromEt = nowEt.Date.AddDays(-30);
             var toEt = nowEt.Date.AddDays(1);
 
-            var fromUtc = TimeZoneInfo.ConvertTimeToUtc(fromEt, _eastern);
-            var toUtc = TimeZoneInfo.ConvertTimeToUtc(toEt, _eastern);
+            var fromUtc = EasternTime.ConvertToUtc(fromEt);
+            var toUtc = EasternTime.ConvertToUtc(toEt);
 
             var games = await _client.GetGamesWithScoresAsync(fromUtc, toUtc);
             if (games.Count == 0)
@@ -62,7 +61,7 @@ namespace BetOddsIngestor.Services
 
                 // Convert start time to ET slate date (your Game.GameDateUtc convention)
                 var utcStart = DateTime.SpecifyKind(g.StartTimeUtc, DateTimeKind.Utc);
-                var startEt = TimeZoneInfo.ConvertTimeFromUtc(utcStart, _eastern);
+                var startEt = EasternTime.ConvertFromUtc(utcStart);
                 var gameDateEt = startEt.Date;
 
                 using var cmd = new SqlCommand("betting.usp_UpsertGameResult", conn)

@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using BetOddsIngestor;
 using BetOddsIngestor.Clients;
 using Microsoft.EntityFrameworkCore;
 using SmartSportsBetting.Domain.Entities;
@@ -17,13 +18,10 @@ namespace BetOddsIngestor.Services
     {
         private readonly BettingDbContext _db;
         private readonly IScheduleProviderClient _client;
-        private readonly TimeZoneInfo _eastern;
-
         public ScheduleIngestionService(BettingDbContext db, IScheduleProviderClient client)
         {
             _db = db;
             _client = client;
-            _eastern = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
         }
 
         public async Task RunOnceAsync()
@@ -32,13 +30,13 @@ namespace BetOddsIngestor.Services
 
             // window: yesterday ET -> +7 days ET (safe buffer)
             var nowUtc = DateTime.UtcNow;
-            var nowEt = TimeZoneInfo.ConvertTimeFromUtc(nowUtc, _eastern);
+            var nowEt = EasternTime.ConvertFromUtc(nowUtc);
 
             var fromEt = nowEt.Date.AddDays(-1);
             var toEt = nowEt.Date.AddDays(7);
 
-            var fromUtc = TimeZoneInfo.ConvertTimeToUtc(fromEt, _eastern);
-            var toUtc = TimeZoneInfo.ConvertTimeToUtc(toEt, _eastern);
+            var fromUtc = EasternTime.ConvertToUtc(fromEt);
+            var toUtc = EasternTime.ConvertToUtc(toEt);
 
             var games = await _client.GetScheduleAsync(fromUtc, toUtc);
             if (!games.Any())
@@ -79,7 +77,7 @@ namespace BetOddsIngestor.Services
 
                 // Normalize to UTC and ET slate date
                 var startUtc = DateTime.SpecifyKind(g.StartTimeUtc, DateTimeKind.Utc);
-                var startEt = TimeZoneInfo.ConvertTimeFromUtc(startUtc, _eastern);
+                var startEt = EasternTime.ConvertFromUtc(startUtc);
                 var gameDateUtc = startEt.Date; // slate day in Eastern
 
                 // Match by ExternalRef (same field odds ingestion uses)
